@@ -103,14 +103,13 @@
         serverVersionEl.textContent = String(data.version || 0);
       }
 
-      creator.saveSurveyFunc = async function (saveNo, callback) {
+      creator.saveSurveyFunc = function (saveNo, callback) {
         if (isApplyingRemote) {
           callback(saveNo, true);
           return;
         }
 
-        try {
-          const res = await fetch(`/api/survey/${encodeURIComponent(roomId)}/save`, {
+        fetch(`/api/survey/${encodeURIComponent(roomId)}/save`, {
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({
@@ -118,27 +117,28 @@
               saveNo,
               surveyJson: creator.JSON
             })
-          });
-          const data = await res.json();
+          })
+          .then((res) => res.json())
+          .then((data) => {
+            if (data.serverVersion != null) {
+              serverVersionEl.textContent = String(data.serverVersion);
+            }
 
-          if (data.serverVersion != null) {
-            serverVersionEl.textContent = String(data.serverVersion);
-          }
-
-          if (data.ok) {
-            setStatus(`Saved #${saveNo} (server v${data.serverVersion})`);
-            callback(saveNo, true);
-          } else if (data.ignored) {
-            setStatus(`Ignored out-of-order #${saveNo}`);
-            callback(saveNo, true);
-          } else {
-            setStatus(`Failed save #${saveNo}: ${data.reason || "unknown"}`);
+            if (data.ok) {
+              setStatus(`Saved #${saveNo} (server v${data.serverVersion})`);
+              callback(saveNo, true);
+            } else if (data.ignored) {
+              setStatus(`Ignored out-of-order #${saveNo}`);
+              callback(saveNo, true);
+            } else {
+              setStatus(`Failed save #${saveNo}: ${data.reason || "unknown"}`);
+              callback(saveNo, false);
+            }
+          })
+          .catch(() => {
+            setStatus(`Network error on save #${saveNo}`);
             callback(saveNo, false);
-          }
-        } catch (err) {
-          setStatus(`Network error on save #${saveNo}`);
-          callback(saveNo, false);
-        }
+          });
       };
 
       function connectSocket() {

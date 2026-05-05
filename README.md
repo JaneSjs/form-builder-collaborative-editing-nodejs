@@ -32,7 +32,11 @@ SurveyJS Creator does not include Google-Docs-style cursor collaboration out of 
 
 ### 1) Incremental save from Survey Creator
 
-The client uses `creator.saveSurveyFunc = async (saveNo, callback) => { ... }`.
+The client uses the callback-style hook:
+
+`creator.saveSurveyFunc = (saveNo, callback) => { ... }`
+
+`saveSurveyFunc` is callback-based. The save operation can still be asynchronous (for example `fetch(...).then(...).catch(...)`), and `callback(saveNo, true|false)` is called when the operation completes.
 
 On each change:
 - Survey Creator provides a monotonically increasing `saveNo`

@@ -74,13 +74,7 @@
           ? crypto.randomUUID()
           : "client-" + Math.random().toString(16).slice(2));
       const apiBaseParam = params.get("apiBase");
-      const wsBaseParam = params.get("wsBase");
       const apiBase = (apiBaseParam || location.origin).replace(/\/$/, "");
-      const wsBase =
-        (wsBaseParam ||
-          (apiBase.startsWith("https://")
-            ? apiBase.replace("https://", "wss://")
-            : apiBase.replace("http://", "ws://"))).replace(/\/$/, "");
 
       document.getElementById("roomId").textContent = roomId;
       document.getElementById("clientId").textContent = clientId;
@@ -98,7 +92,9 @@
       creator.render("surveyCreatorContainer");
 
       let isApplyingRemote = false;
-      let socket = null;
+      let eventSource = null;
+      let lastKnownVersion = 0;
+      let pollTimer = null;
 
       function setStatus(message) {
         statusEl.textContent = message;
@@ -108,7 +104,8 @@
         const res = await fetch(`${apiBase}/api/survey/${encodeURIComponent(roomId)}`);
         const data = await res.json();
         creator.JSON = data.schema || { pages: [] };
-        serverVersionEl.textContent = String(data.version || 0);
+        lastKnownVersion = Number(data.version || 0);
+        serverVersionEl.textContent = String(lastKnownVersion);
       }
 
       creator.saveSurveyFunc = function (saveNo, callback) {
@@ -129,7 +126,8 @@
           .then((res) => res.json())
           .then((data) => {
             if (data.serverVersion != null) {
-              serverVersionEl.textContent = String(data.serverVersion);
+              lastKnownVersion = Number(data.serverVersion);
+              serverVersionEl.textContent = String(lastKnownVersion);
             }
 
             if (data.ok) {
@@ -149,21 +147,54 @@
           });
       };
 
-      function connectSocket() {
-        socket = new WebSocket(wsBase);
+      function startPollingFallback() {
+        if (pollTimer) {
+          return;
+        }
+        setStatus("Live stream disconnected. Using polling fallback...");
+        pollTimer = setInterval(async () => {
+          try {
+            const res = await fetch(
+              `${apiBase}/api/survey/${encodeURIComponent(roomId)}?sinceVersion=${lastKnownVersion}`
+            );
+            const data = await res.json();
+            if (!data.hasUpdate) {
+              return;
+            }
+            if (data.version != null) {
+              lastKnownVersion = Number(data.version);
+              serverVersionEl.textContent = String(lastKnownVersion);
+            }
+            isApplyingRemote = true;
+            creator.JSON = data.schema || { pages: [] };
+            isApplyingRemote = false;
+            setStatus("Applied update via polling fallback");
+          } catch {
+            setStatus("Polling failed. Retrying...");
+          }
+        }, 2000);
+      }
 
-        socket.onopen = () => {
-          setStatus("Connected for live updates");
-          socket.send(
-            JSON.stringify({
-              type: "join-room",
-              roomId,
-              clientId
-            })
-          );
+      function stopPollingFallback() {
+        if (!pollTimer) {
+          return;
+        }
+        clearInterval(pollTimer);
+        pollTimer = null;
+      }
+
+      function connectEventStream() {
+        const streamUrl =
+          `${apiBase}/api/stream/${encodeURIComponent(roomId)}` +
+          `?clientId=${encodeURIComponent(clientId)}`;
+        eventSource = new EventSource(streamUrl);
+
+        eventSource.onopen = () => {
+          stopPollingFallback();
+          setStatus("Connected for live updates (SSE)");
         };
 
-        socket.onmessage = (event) => {
+        eventSource.onmessage = (event) => {
           const msg = JSON.parse(event.data);
           if (msg.type === "room-state") {
             return;
@@ -171,31 +202,31 @@
           if (msg.type !== "survey-updated") {
             return;
           }
-          if (msg.senderClientId === clientId) {
-            return;
+          if (msg.serverVersion != null) {
+            lastKnownVersion = Number(msg.serverVersion);
+            serverVersionEl.textContent = String(lastKnownVersion);
           }
 
           isApplyingRemote = true;
           creator.JSON = msg.surveyJson;
           isApplyingRemote = false;
 
-          serverVersionEl.textContent = String(msg.serverVersion || 0);
           setStatus(
             `Applied remote change from ${msg.senderClientId} (save #${msg.saveNo})`
           );
         };
 
-        socket.onclose = () => {
-          setStatus("Disconnected. Reconnecting...");
-          setTimeout(connectSocket, 1000);
-        };
-
-        socket.onerror = () => {
-          setStatus("Socket error");
+        eventSource.onerror = () => {
+          if (eventSource) {
+            eventSource.close();
+            eventSource = null;
+          }
+          startPollingFallback();
+          setTimeout(connectEventStream, 3000);
         };
       }
 
-      loadInitial().then(connectSocket);
+      loadInitial().then(connectEventStream);
     </script>
   </body>
 </html>

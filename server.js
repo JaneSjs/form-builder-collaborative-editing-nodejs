@@ -1,8 +1,22 @@
 const path = require("path");
 const express = require("express");
+const cors = require("cors");
 const { WebSocketServer } = require("ws");
 
 const app = express();
+const allowedOrigins = (process.env.CORS_ORIGIN || "")
+  .split(",")
+  .map((s) => s.trim())
+  .filter(Boolean);
+
+if (allowedOrigins.length > 0) {
+  app.use(
+    cors({
+      origin: allowedOrigins
+    })
+  );
+}
+
 app.use(express.json());
 app.use(express.static(path.join(__dirname, "public")));
 
@@ -80,8 +94,9 @@ app.post("/api/survey/:roomId/save", (req, res) => {
   });
 });
 
-const server = app.listen(3000, () => {
-  console.log("Demo running on http://localhost:3000");
+const PORT = Number(process.env.PORT) || 3000;
+const server = app.listen(PORT, () => {
+  console.log(`Demo running on http://localhost:${PORT}`);
 });
 
 const wss = new WebSocketServer({ server });

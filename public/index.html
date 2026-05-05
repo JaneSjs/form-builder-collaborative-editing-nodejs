@@ -73,6 +73,14 @@
         (window.crypto && crypto.randomUUID
           ? crypto.randomUUID()
           : "client-" + Math.random().toString(16).slice(2));
+      const apiBaseParam = params.get("apiBase");
+      const wsBaseParam = params.get("wsBase");
+      const apiBase = (apiBaseParam || location.origin).replace(/\/$/, "");
+      const wsBase =
+        (wsBaseParam ||
+          (apiBase.startsWith("https://")
+            ? apiBase.replace("https://", "wss://")
+            : apiBase.replace("http://", "ws://"))).replace(/\/$/, "");
 
       document.getElementById("roomId").textContent = roomId;
       document.getElementById("clientId").textContent = clientId;
@@ -97,7 +105,7 @@
       }
 
       async function loadInitial() {
-        const res = await fetch(`/api/survey/${encodeURIComponent(roomId)}`);
+        const res = await fetch(`${apiBase}/api/survey/${encodeURIComponent(roomId)}`);
         const data = await res.json();
         creator.JSON = data.schema || { pages: [] };
         serverVersionEl.textContent = String(data.version || 0);
@@ -109,7 +117,7 @@
           return;
         }
 
-        fetch(`/api/survey/${encodeURIComponent(roomId)}/save`, {
+        fetch(`${apiBase}/api/survey/${encodeURIComponent(roomId)}/save`, {
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({
@@ -142,8 +150,7 @@
       };
 
       function connectSocket() {
-        const protocol = location.protocol === "https:" ? "wss:" : "ws:";
-        socket = new WebSocket(`${protocol}//${location.host}`);
+        socket = new WebSocket(wsBase);
 
         socket.onopen = () => {
           setStatus("Connected for live updates");

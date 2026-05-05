@@ -74,6 +74,10 @@ App runs at:
 
 - `http://localhost:3000`
 
+Optional env var for cross-origin local testing:
+
+- `CORS_ORIGIN=http://localhost:3000,http://localhost:5173`
+
 ## Test Collaboration
 
 Open two browser windows/tabs:
@@ -92,3 +96,43 @@ Then:
 - Restarting server resets all room data.
 - No cursor-level collaboration/selection tracking is implemented.
 - For production, add persistent storage, authentication, authorization, and conflict strategy (e.g., base version checks or merge rules).
+
+## Deploy (Vercel + Node Host)
+
+Because this demo uses a native WebSocket server (`ws`) with long-lived connections, the recommended deployment is:
+
+- **Frontend** on Vercel
+- **Backend** on a Node host (Render / Railway / Fly.io / VM)
+
+### 1) Deploy backend
+
+Deploy this repo as a Node service and set:
+
+- Start command: `npm start`
+- Port: use platform-provided `PORT` (already supported in `server.js`)
+- Env var `CORS_ORIGIN` to your Vercel site URL (or comma-separated list)
+
+Example:
+
+- `CORS_ORIGIN=https://your-app.vercel.app`
+
+### 2) Deploy frontend to Vercel
+
+You can deploy the same repo, then open the app using query params to point to backend:
+
+- `apiBase`: backend HTTP URL
+- `wsBase`: backend WS URL
+
+Example URL:
+
+- `https://your-app.vercel.app/?room=demo-room&client=alice&apiBase=https://your-backend.onrender.com&wsBase=wss://your-backend.onrender.com`
+
+Open a second client:
+
+- `https://your-app.vercel.app/?room=demo-room&client=bob&apiBase=https://your-backend.onrender.com&wsBase=wss://your-backend.onrender.com`
+
+### 3) Verify
+
+- Edit survey on client A
+- Confirm save status updates
+- Confirm client B receives the change in near real time

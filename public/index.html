@@ -1,0 +1,194 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>SurveyJS Creator Real-Time Demo</title>
+    <link
+      rel="stylesheet"
+      href="https://unpkg.com/survey-core@2.5.22/survey-core.min.css"
+    />
+    <link
+      rel="stylesheet"
+      href="https://unpkg.com/survey-creator-core@2.5.22/survey-creator-core.min.css"
+    />
+    <style>
+      html,
+      body {
+        height: 100%;
+      }
+      body {
+        font-family: Arial, sans-serif;
+        margin: 0;
+        display: flex;
+        flex-direction: column;
+        min-height: 100dvh;
+        overflow: hidden;
+      }
+      .topbar {
+        display: flex;
+        gap: 16px;
+        align-items: center;
+        padding: 10px 14px;
+        border-bottom: 1px solid #ddd;
+        background: #fafafa;
+        flex-wrap: wrap;
+      }
+      .badge {
+        padding: 3px 8px;
+        border-radius: 999px;
+        background: #eef;
+      }
+      #status {
+        color: #444;
+      }
+      #surveyCreatorContainer {
+        flex: 1 1 auto;
+        min-height: 0;
+      }
+    </style>
+  </head>
+  <body>
+    <div class="topbar">
+      <span class="badge">Room: <strong id="roomId"></strong></span>
+      <span class="badge">Client: <strong id="clientId"></strong></span>
+      <span class="badge">Server version: <strong id="serverVersion">0</strong></span>
+      <span id="status">Connecting...</span>
+    </div>
+    <div id="surveyCreatorContainer"></div>
+
+    <script src="https://unpkg.com/survey-core@2.5.22/survey.core.min.js"></script>
+    <script src="https://unpkg.com/survey-core@2.5.22/survey.i18n.min.js"></script>
+    <script src="https://unpkg.com/survey-core@2.5.22/themes/index.min.js"></script>
+    <script src="https://unpkg.com/survey-js-ui@2.5.22/survey-js-ui.min.js"></script>
+    <script src="https://unpkg.com/survey-creator-core@2.5.22/survey-creator-core.min.js"></script>
+    <script src="https://unpkg.com/survey-creator-core@2.5.22/survey-creator-core.i18n.min.js"></script>
+    <script src="https://unpkg.com/survey-creator-core@2.5.22/themes/index.min.js"></script>
+    <script src="https://unpkg.com/survey-creator-js@2.5.22/survey-creator-js.min.js"></script>
+    <script>
+      const params = new URLSearchParams(window.location.search);
+      const roomId = params.get("room") || "demo-room";
+      const clientId =
+        params.get("client") ||
+        (window.crypto && crypto.randomUUID
+          ? crypto.randomUUID()
+          : "client-" + Math.random().toString(16).slice(2));
+
+      document.getElementById("roomId").textContent = roomId;
+      document.getElementById("clientId").textContent = clientId;
+
+      const statusEl = document.getElementById("status");
+      const serverVersionEl = document.getElementById("serverVersion");
+
+      const creator = new SurveyCreator.SurveyCreator({
+        showJSONEditorTab: false
+      });
+      creator.toolbox.forceCompact = true;
+      creator.showLogicTab = true;
+      creator.autoSaveEnabled = true;
+      
+      creator.render("surveyCreatorContainer");
+
+      let isApplyingRemote = false;
+      let socket = null;
+
+      function setStatus(message) {
+        statusEl.textContent = message;
+      }
+
+      async function loadInitial() {
+        const res = await fetch(`/api/survey/${encodeURIComponent(roomId)}`);
+        const data = await res.json();
+        creator.JSON = data.schema || { pages: [] };
+        serverVersionEl.textContent = String(data.version || 0);
+      }
+
+      creator.saveSurveyFunc = async function (saveNo, callback) {
+        if (isApplyingRemote) {
+          callback(saveNo, true);
+          return;
+        }
+
+        try {
+          const res = await fetch(`/api/survey/${encodeURIComponent(roomId)}/save`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              clientId,
+              saveNo,
+              surveyJson: creator.JSON
+            })
+          });
+          const data = await res.json();
+
+          if (data.serverVersion != null) {
+            serverVersionEl.textContent = String(data.serverVersion);
+          }
+
+          if (data.ok) {
+            setStatus(`Saved #${saveNo} (server v${data.serverVersion})`);
+            callback(saveNo, true);
+          } else if (data.ignored) {
+            setStatus(`Ignored out-of-order #${saveNo}`);
+            callback(saveNo, true);
+          } else {
+            setStatus(`Failed save #${saveNo}: ${data.reason || "unknown"}`);
+            callback(saveNo, false);
+          }
+        } catch (err) {
+          setStatus(`Network error on save #${saveNo}`);
+          callback(saveNo, false);
+        }
+      };
+
+      function connectSocket() {
+        const protocol = location.protocol === "https:" ? "wss:" : "ws:";
+        socket = new WebSocket(`${protocol}//${location.host}`);
+
+        socket.onopen = () => {
+          setStatus("Connected for live updates");
+          socket.send(
+            JSON.stringify({
+              type: "join-room",
+              roomId,
+              clientId
+            })
+          );
+        };
+
+        socket.onmessage = (event) => {
+          const msg = JSON.parse(event.data);
+          if (msg.type === "room-state") {
+            return;
+          }
+          if (msg.type !== "survey-updated") {
+            return;
+          }
+          if (msg.senderClientId === clientId) {
+            return;
+          }
+
+          isApplyingRemote = true;
+          creator.JSON = msg.surveyJson;
+          isApplyingRemote = false;
+
+          serverVersionEl.textContent = String(msg.serverVersion || 0);
+          setStatus(
+            `Applied remote change from ${msg.senderClientId} (save #${msg.saveNo})`
+          );
+        };
+
+        socket.onclose = () => {
+          setStatus("Disconnected. Reconnecting...");
+          setTimeout(connectSocket, 1000);
+        };
+
+        socket.onerror = () => {
+          setStatus("Socket error");
+        };
+      }
+
+      loadInitial().then(connectSocket);
+    </script>
+  </body>
+</html>

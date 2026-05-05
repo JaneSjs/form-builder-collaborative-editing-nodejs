@@ -1,0 +1,14 @@
+{
+  "name": "surveyjs-realtime-demo",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Sample all-in-one server/client demo for SurveyJS Creator incremental saveNo and real-time sync",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "dependencies": {
+    "express": "^5.2.1",
+    "ws": "^8.20.0"
+  }
+}

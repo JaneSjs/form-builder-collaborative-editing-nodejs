@@ -95,6 +95,8 @@
       let eventSource = null;
       let lastKnownVersion = 0;
       let pollTimer = null;
+      let sseOpened = false;
+      let sseFallbackTimer = null;
 
       function setStatus(message) {
         statusEl.textContent = message;
@@ -184,12 +186,33 @@
       }
 
       function connectEventStream() {
+        if (eventSource) {
+          return;
+        }
+
         const streamUrl =
           `${apiBase}/api/stream/${encodeURIComponent(roomId)}` +
           `?clientId=${encodeURIComponent(clientId)}`;
+        sseOpened = false;
+
+        if (sseFallbackTimer) {
+          clearTimeout(sseFallbackTimer);
+          sseFallbackTimer = null;
+        }
+        sseFallbackTimer = setTimeout(() => {
+          if (!sseOpened) {
+            startPollingFallback();
+          }
+        }, 8000);
+
         eventSource = new EventSource(streamUrl);
 
         eventSource.onopen = () => {
+          sseOpened = true;
+          if (sseFallbackTimer) {
+            clearTimeout(sseFallbackTimer);
+            sseFallbackTimer = null;
+          }
           stopPollingFallback();
           setStatus("Connected for live updates (SSE)");
         };
@@ -216,13 +239,12 @@
           );
         };
 
+        // Do not close/reconnect manually: native EventSource retries on its own.
+        // Closing here caused duplicate streams + spurious "polling fallback".
         eventSource.onerror = () => {
-          if (eventSource) {
-            eventSource.close();
-            eventSource = null;
+          if (!sseOpened) {
+            setStatus("Connecting to live stream…");
           }
-          startPollingFallback();
-          setTimeout(connectEventStream, 3000);
         };
       }
 

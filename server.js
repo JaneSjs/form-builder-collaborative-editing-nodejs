@@ -68,9 +68,11 @@ app.get("/api/stream/:roomId", (req, res) => {
   const { roomId } = req.params;
   const { clientId = "" } = req.query;
 
-  res.setHeader("Content-Type", "text/event-stream");
-  res.setHeader("Cache-Control", "no-cache");
+  req.socket?.setTimeout?.(0);
+  res.setHeader("Content-Type", "text/event-stream; charset=utf-8");
+  res.setHeader("Cache-Control", "no-cache, no-transform");
   res.setHeader("Connection", "keep-alive");
+  res.setHeader("X-Accel-Buffering", "no");
   res.flushHeaders?.();
 
   const entry = { res, clientId: String(clientId) };
@@ -88,7 +90,17 @@ app.get("/api/stream/:roomId", (req, res) => {
     })}\n\n`
   );
 
+  const pingMs = 20000;
+  const pingTimer = setInterval(() => {
+    try {
+      res.write(`: ping ${Date.now()}\n\n`);
+    } catch {
+      clearInterval(pingTimer);
+    }
+  }, pingMs);
+
   req.on("close", () => {
+    clearInterval(pingTimer);
     const roomClients = sseClientsByRoom.get(roomId);
     if (!roomClients) {
       return;
@@ -145,9 +157,12 @@ app.post("/api/survey/:roomId/save", (req, res) => {
 });
 
 const PORT = Number(process.env.PORT) || 3000;
-app.listen(PORT, () => {
+const server = app.listen(PORT, () => {
   console.log(`Demo running on http://localhost:${PORT}`);
 });
+
+server.headersTimeout = 0;
+server.requestTimeout = 0;
 
 function broadcast(roomId, payload) {
   const roomClients = sseClientsByRoom.get(roomId);
